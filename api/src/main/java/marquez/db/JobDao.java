@@ -128,6 +128,25 @@ public interface JobDao extends BaseDao {
   Optional<JobRow> findJobByNameAsRow(String namespaceName, String jobName);
 
   @SqlQuery(
+      """
+      WITH RECURSIVE job_ids AS (
+        SELECT uuid, uuid AS link_target_uuid, symlink_target_uuid
+        FROM jobs j
+        WHERE j.namespace_name=:namespaceName AND j.name=:jobName AND j.parent_job_uuid=:parentJobId
+        UNION
+        SELECT jn.uuid, j.uuid AS link_target_uuid, j.symlink_target_uuid
+        FROM jobs j
+        INNER JOIN job_ids jn ON j.uuid=jn.symlink_target_uuid
+      )
+      SELECT j.*, n.name AS namespace_name
+      FROM jobs_view AS j
+      INNER JOIN job_ids jn ON jn.link_target_uuid=j.uuid AND jn.symlink_target_uuid IS NULL
+      INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
+      """)
+  Optional<JobRow> findJobBySimpleNameAndParentAsRow(
+      String namespaceName, String jobName, UUID parentJobId);
+
+  @SqlQuery(
       "SELECT j.*, jc.context, f.facets\n"
           + "  FROM jobs_view AS j\n"
           + "  LEFT OUTER JOIN job_versions AS jv ON jv.uuid = j.current_version_uuid\n"
@@ -274,8 +293,8 @@ public interface JobDao extends BaseDao {
           :location,
           :inputs,
           :symlinkTargetId
-          ) ON CONFLICT (name, namespace_uuid) WHERE parent_job_uuid IS NULL DO
-          UPDATE SET
+          ) ON CONFLICT (name, namespace_uuid) WHERE parent_job_uuid IS NULL
+          DO UPDATE SET
           updated_at = EXCLUDED.updated_at,
           type = EXCLUDED.type,
           description = EXCLUDED.description,
@@ -286,7 +305,7 @@ public interface JobDao extends BaseDao {
           symlink_target_uuid = COALESCE(EXCLUDED.symlink_target_uuid, j.symlink_target_uuid)
           RETURNING uuid
           """)
-  UUID upsertJobNoParent(
+  UUID doUpsertJob(
       UUID uuid,
       JobType type,
       Instant now,
@@ -311,8 +330,8 @@ public interface JobDao extends BaseDao {
       String location,
       UUID symlinkTargetId,
       PGobject inputs) {
-    UUID jobUuid =
-        upsertJobNoParent(
+    UUID insertId =
+        doUpsertJob(
             uuid,
             type,
             now,
@@ -324,10 +343,75 @@ public interface JobDao extends BaseDao {
             location,
             symlinkTargetId,
             inputs);
-    return findJobByUuidAsRow(jobUuid).get();
+    return findJobByUuidAsRow(insertId).orElseThrow();
   }
 
-  @SqlQuery(
+  @SqlUpdate(
+      """
+          INSERT INTO jobs AS j (
+          uuid,
+          type,
+          created_at,
+          updated_at,
+          namespace_uuid,
+          namespace_name,
+          name,
+          description,
+          current_job_context_uuid,
+          current_location,
+          current_inputs
+          ) VALUES (
+          :uuid,
+          :type,
+          :now,
+          :now,
+          :namespaceUuid,
+          :namespaceName,
+          :name,
+          :description,
+          :jobContextUuid,
+          :location,
+          :inputs
+          ) ON CONFLICT DO NOTHING
+          """)
+  void upsertJobNoParent(
+      UUID uuid,
+      JobType type,
+      Instant now,
+      UUID namespaceUuid,
+      String namespaceName,
+      String name,
+      String description,
+      UUID jobContextUuid,
+      String location,
+      PGobject inputs);
+
+  default JobRow insertOrFind(
+      UUID uuid,
+      JobType type,
+      Instant now,
+      UUID namespaceUuid,
+      String namespaceName,
+      String name,
+      String description,
+      UUID jobContextUuid,
+      String location,
+      PGobject inputs) {
+    upsertJobNoParent(
+        uuid,
+        type,
+        now,
+        namespaceUuid,
+        namespaceName,
+        name,
+        description,
+        jobContextUuid,
+        location,
+        inputs);
+    return findJobByNameAsRow(namespaceName, name).orElseThrow();
+  }
+
+  @SqlUpdate(
       """
           INSERT INTO jobs AS j (
           uuid,
@@ -341,8 +425,7 @@ public interface JobDao extends BaseDao {
           description,
           current_job_context_uuid,
           current_location,
-          current_inputs,
-          symlink_target_uuid
+          current_inputs
           ) VALUES (
           :uuid,
           :parentJobUuid,
@@ -355,21 +438,10 @@ public interface JobDao extends BaseDao {
           :description,
           :jobContextUuid,
           :location,
-          :inputs,
-          :symlinkTargetId
-          ) ON CONFLICT (name, namespace_uuid, parent_job_uuid) DO
-          UPDATE SET
-          updated_at = EXCLUDED.updated_at,
-          type = EXCLUDED.type,
-          description = EXCLUDED.description,
-          current_job_context_uuid = EXCLUDED.current_job_context_uuid,
-          current_location = EXCLUDED.current_location,
-          current_inputs = EXCLUDED.current_inputs,
-          -- update the symlink target if not null. otherwise, keep the old value
-          symlink_target_uuid = COALESCE(EXCLUDED.symlink_target_uuid, j.symlink_target_uuid)
-          RETURNING uuid
+          :inputs
+          ) ON CONFLICT(name, namespace_name, parent_job_uuid) DO NOTHING
           """)
-  UUID upsertJobWithParent(
+  void doInsertJobWithParent(
       UUID uuid,
       UUID parentJobUuid,
       JobType type,
@@ -380,10 +452,9 @@ public interface JobDao extends BaseDao {
       String description,
       UUID jobContextUuid,
       String location,
-      UUID symlinkTargetId,
       PGobject inputs);
 
-  default JobRow upsertJob(
+  default JobRow insertOrFind(
       UUID uuid,
       UUID parentJobUuid,
       JobType type,
@@ -394,22 +465,19 @@ public interface JobDao extends BaseDao {
       String description,
       UUID jobContextUuid,
       String location,
-      UUID symlinkTargetId,
       PGobject inputs) {
-    UUID jobUuid =
-        upsertJobWithParent(
-            uuid,
-            parentJobUuid,
-            type,
-            now,
-            namespaceUuid,
-            namespaceName,
-            name,
-            description,
-            jobContextUuid,
-            location,
-            symlinkTargetId,
-            inputs);
-    return findJobByUuidAsRow(jobUuid).get();
+    doInsertJobWithParent(
+        uuid,
+        parentJobUuid,
+        type,
+        now,
+        namespaceUuid,
+        namespaceName,
+        name,
+        description,
+        jobContextUuid,
+        location,
+        inputs);
+    return findJobBySimpleNameAndParentAsRow(namespaceName, name, parentJobUuid).orElseThrow();
   }
 }
