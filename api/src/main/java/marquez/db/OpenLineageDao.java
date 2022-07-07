@@ -170,7 +170,7 @@ public interface OpenLineageDao extends BaseDao {
                         .orElseGet(
                             () -> {
                               JobRow newParentJobRow =
-                                  jobDao.upsertJob(
+                                  jobDao.findOrInsert(
                                       UUID.randomUUID(),
                                       getJobType(event.getJob()),
                                       now,
@@ -238,7 +238,7 @@ public interface OpenLineageDao extends BaseDao {
         parentJob
             .map(
                 parent ->
-                    jobDao.upsertJob(
+                    jobDao.findOrInsert(
                         UUID.randomUUID(),
                         parent.getUuid(),
                         getJobType(event.getJob()),
@@ -253,7 +253,7 @@ public interface OpenLineageDao extends BaseDao {
                         jobDao.toJson(toDatasetId(event.getInputs()), mapper)))
             .orElseGet(
                 () ->
-                    jobDao.upsertJob(
+                    jobDao.findOrInsert(
                         UUID.randomUUID(),
                         getJobType(event.getJob()),
                         now,

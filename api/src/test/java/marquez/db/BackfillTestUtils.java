@@ -52,7 +52,7 @@ public class BackfillTestUtils {
     pgInputs.setType("json");
     pgInputs.setValue("[]");
     JobRow jobRow =
-        jobDao.upsertJob(
+        jobDao.findOrInsert(
             UUID.randomUUID(),
             JobType.BATCH,
             now,

@@ -757,7 +757,7 @@ public class MarquezAppIntegrationTest extends BaseIntegrationTest {
     inputs.setValue("[]");
     JobRow jobRow = originalJobRow.get();
     JobRow targetJobRow =
-        jobDao.upsertJob(
+        jobDao.findOrInsert(
             UUID.randomUUID(),
             parentJobRow.get().getUuid(),
             JobType.valueOf(jobRow.getType()),

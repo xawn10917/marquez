@@ -147,7 +147,7 @@ public class OpenLineageServiceIntegrationTest {
             .upsertNamespaceRow(UUID.randomUUID(), Instant.now(), NAMESPACE, "me");
     JobRow job =
         jdbi.onDemand(JobDao.class)
-            .upsertJob(
+            .findOrInsert(
                 UUID.randomUUID(),
                 JobType.BATCH,
                 Instant.now(),

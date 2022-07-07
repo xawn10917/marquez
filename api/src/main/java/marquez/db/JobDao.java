@@ -37,6 +37,7 @@ import org.postgresql.util.PGobject;
 @RegisterRowMapper(JobRowMapper.class)
 @RegisterRowMapper(JobMapper.class)
 public interface JobDao extends BaseDao {
+
   @SqlQuery(
       "SELECT EXISTS (SELECT 1 FROM jobs_view AS j "
           + "WHERE j.namespace_name= :namespaceName AND "
@@ -93,38 +94,29 @@ public interface JobDao extends BaseDao {
 
   @SqlQuery(
       """
-      WITH RECURSIVE job_ids AS (
-        SELECT uuid, uuid AS link_target_uuid, symlink_target_uuid
-        FROM jobs_view j
-        WHERE j.uuid=:jobUuid
-        UNION
-        SELECT jn.uuid, j.uuid AS link_target_uuid, j.symlink_target_uuid
-        FROM jobs_view j
-        INNER JOIN job_ids jn ON j.uuid=jn.symlink_target_uuid
-      )
-      SELECT j.*, n.name AS namespace_name
-      FROM jobs_view AS j
-      INNER JOIN job_ids jn ON jn.link_target_uuid=j.uuid AND jn.symlink_target_uuid IS NULL
-      INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
-      """)
+          SELECT j.*, n.name AS namespace_name
+          FROM jobs_view AS j
+          INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
+          WHERE j.uuid=:jobUuid
+          """)
   Optional<JobRow> findJobByUuidAsRow(UUID jobUuid);
 
   @SqlQuery(
       """
-      WITH RECURSIVE job_ids AS (
-        SELECT uuid, uuid AS link_target_uuid, symlink_target_uuid
-        FROM jobs_view j
-        WHERE j.namespace_name=:namespaceName AND j.name=:jobName
-        UNION
-        SELECT jn.uuid, j.uuid AS link_target_uuid, j.symlink_target_uuid
-        FROM jobs_view j
-        INNER JOIN job_ids jn ON j.uuid=jn.symlink_target_uuid
-      )
-      SELECT j.*, n.name AS namespace_name
-      FROM jobs_view AS j
-      INNER JOIN job_ids jn ON jn.link_target_uuid=j.uuid AND jn.symlink_target_uuid IS NULL
-      INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
-      """)
+          WITH RECURSIVE job_ids AS (
+            SELECT uuid, uuid AS link_target_uuid, symlink_target_uuid
+            FROM jobs_view j
+            WHERE j.namespace_name=:namespaceName AND j.name=:jobName
+            UNION
+            SELECT jn.uuid, j.uuid AS link_target_uuid, j.symlink_target_uuid
+            FROM jobs_view j
+            INNER JOIN job_ids jn ON j.uuid=jn.symlink_target_uuid
+          )
+          SELECT j.*, n.name AS namespace_name
+          FROM jobs_view AS j
+          INNER JOIN job_ids jn ON jn.link_target_uuid=j.uuid AND jn.symlink_target_uuid IS NULL
+          INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
+          """)
   Optional<JobRow> findJobByNameAsRow(String namespaceName, String jobName);
 
   @SqlQuery(
@@ -214,7 +206,7 @@ public interface JobDao extends BaseDao {
                 Utils.toJson(jobMeta.getContext()),
                 Utils.checksumFor(jobMeta.getContext()));
 
-    return upsertJob(
+    return findOrInsert(
         UUID.randomUUID(),
         jobMeta.getType(),
         createdAt,
@@ -246,9 +238,37 @@ public interface JobDao extends BaseDao {
     }
   }
 
+  default JobRow findOrInsert(
+      UUID uuid,
+      JobType type,
+      Instant now,
+      UUID namespaceUuid,
+      String namespaceName,
+      String name,
+      String description,
+      UUID jobContextUuid,
+      String location,
+      UUID symlinkTargetId,
+      PGobject inputs) {
+    UUID id =
+        upsertJob(
+            uuid,
+            type,
+            now,
+            namespaceUuid,
+            namespaceName,
+            name,
+            description,
+            jobContextUuid,
+            location,
+            symlinkTargetId,
+            inputs);
+    return findJobByUuidAsRow(id).orElseThrow();
+  }
+
   @SqlQuery(
       """
-          INSERT INTO jobs AS j (
+          INSERT INTO jobs_view AS j (
           uuid,
           type,
           created_at,
@@ -274,19 +294,10 @@ public interface JobDao extends BaseDao {
           :location,
           :inputs,
           :symlinkTargetId
-          ) ON CONFLICT (name, namespace_uuid) WHERE parent_job_uuid IS NULL DO
-          UPDATE SET
-          updated_at = EXCLUDED.updated_at,
-          type = EXCLUDED.type,
-          description = EXCLUDED.description,
-          current_job_context_uuid = EXCLUDED.current_job_context_uuid,
-          current_location = EXCLUDED.current_location,
-          current_inputs = EXCLUDED.current_inputs,
-          -- update the symlink target if not null. otherwise, keep the old value
-          symlink_target_uuid = COALESCE(EXCLUDED.symlink_target_uuid, j.symlink_target_uuid)
+          )
           RETURNING uuid
           """)
-  UUID upsertJobNoParent(
+  UUID upsertJob(
       UUID uuid,
       JobType type,
       Instant now,
@@ -299,8 +310,9 @@ public interface JobDao extends BaseDao {
       UUID symlinkTargetId,
       PGobject inputs);
 
-  default JobRow upsertJob(
+  default JobRow findOrInsert(
       UUID uuid,
+      UUID parentJobUuid,
       JobType type,
       Instant now,
       UUID namespaceUuid,
@@ -311,9 +323,10 @@ public interface JobDao extends BaseDao {
       String location,
       UUID symlinkTargetId,
       PGobject inputs) {
-    UUID jobUuid =
-        upsertJobNoParent(
+    UUID id =
+        upsertJob(
             uuid,
+            parentJobUuid,
             type,
             now,
             namespaceUuid,
@@ -324,12 +337,12 @@ public interface JobDao extends BaseDao {
             location,
             symlinkTargetId,
             inputs);
-    return findJobByUuidAsRow(jobUuid).get();
+    return findJobByUuidAsRow(id).orElseThrow();
   }
 
   @SqlQuery(
       """
-          INSERT INTO jobs AS j (
+          INSERT INTO jobs_view AS j (
           uuid,
           parent_job_uuid,
           type,
@@ -357,19 +370,10 @@ public interface JobDao extends BaseDao {
           :location,
           :inputs,
           :symlinkTargetId
-          ) ON CONFLICT (name, namespace_uuid, parent_job_uuid) DO
-          UPDATE SET
-          updated_at = EXCLUDED.updated_at,
-          type = EXCLUDED.type,
-          description = EXCLUDED.description,
-          current_job_context_uuid = EXCLUDED.current_job_context_uuid,
-          current_location = EXCLUDED.current_location,
-          current_inputs = EXCLUDED.current_inputs,
-          -- update the symlink target if not null. otherwise, keep the old value
-          symlink_target_uuid = COALESCE(EXCLUDED.symlink_target_uuid, j.symlink_target_uuid)
+          )
           RETURNING uuid
           """)
-  UUID upsertJobWithParent(
+  UUID upsertJob(
       UUID uuid,
       UUID parentJobUuid,
       JobType type,
@@ -382,34 +386,4 @@ public interface JobDao extends BaseDao {
       String location,
       UUID symlinkTargetId,
       PGobject inputs);
-
-  default JobRow upsertJob(
-      UUID uuid,
-      UUID parentJobUuid,
-      JobType type,
-      Instant now,
-      UUID namespaceUuid,
-      String namespaceName,
-      String name,
-      String description,
-      UUID jobContextUuid,
-      String location,
-      UUID symlinkTargetId,
-      PGobject inputs) {
-    UUID jobUuid =
-        upsertJobWithParent(
-            uuid,
-            parentJobUuid,
-            type,
-            now,
-            namespaceUuid,
-            namespaceName,
-            name,
-            description,
-            jobContextUuid,
-            location,
-            symlinkTargetId,
-            inputs);
-    return findJobByUuidAsRow(jobUuid).get();
-  }
 }
