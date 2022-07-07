@@ -757,7 +757,7 @@ public class MarquezAppIntegrationTest extends BaseIntegrationTest {
     inputs.setValue("[]");
     JobRow jobRow = originalJobRow.get();
     JobRow targetJobRow =
-        jobDao.insertOrFind(
+        jobDao.upsertJob(
             UUID.randomUUID(),
             parentJobRow.get().getUuid(),
             JobType.valueOf(jobRow.getType()),
@@ -768,6 +768,7 @@ public class MarquezAppIntegrationTest extends BaseIntegrationTest {
             jobRow.getDescription().orElse(null),
             jobRow.getJobContextUuid().orElse(null),
             jobRow.getLocation(),
+            null,
             inputs);
     // symlink the old job to point to the new one that has a parent uuid
     jobDao.upsertJob(
