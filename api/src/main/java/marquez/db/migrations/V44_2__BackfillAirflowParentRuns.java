@@ -70,14 +70,12 @@ public class V44_2__BackfillAirflowParentRuns implements JavaMigration {
 """;
   public static final String INSERT_PARENT_JOB_QUERY =
       """
-      INSERT INTO jobs (uuid, type, created_at, updated_at, namespace_uuid, name, description,
+      INSERT INTO jobs_view (uuid, type, created_at, updated_at, namespace_uuid, name, description,
       namespace_name, current_location)
       SELECT :uuid, type, created_at, updated_at, namespace_uuid, :name, description, namespace_name,
       current_location
       FROM jobs
       WHERE namespace_name=:namespace AND name=:jobName
-      ON CONFLICT(name, namespace_uuid) WHERE parent_job_uuid IS NULL
-      DO UPDATE SET updated_at=now()
       RETURNING uuid
       """;
   public static final String INSERT_PARENT_RUN_QUERY =

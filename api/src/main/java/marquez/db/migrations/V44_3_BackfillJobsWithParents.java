@@ -50,14 +50,13 @@ public class V44_3_BackfillJobsWithParents implements JavaMigration {
       """;
   public static final String INSERT_NEW_JOB_WITH_PARENT =
       """
-      INSERT INTO jobs(uuid, type, created_at, updated_at, namespace_uuid, name, description,
+      INSERT INTO jobs_view(uuid, type, created_at, updated_at, namespace_uuid, name, description,
         current_version_uuid, namespace_name, current_job_context_uuid, current_location, current_inputs,
         parent_job_uuid)
       SELECT :uuid, type, created_at, updated_at, namespace_uuid, name, description, current_version_uuid,
         namespace_name, current_job_context_uuid, current_location, current_inputs, :parent_job_uuid
         FROM jobs
         WHERE uuid=:job_uuid
-        ON CONFLICT (name, namespace_name, parent_job_uuid) DO NOTHING
         RETURNING uuid
       """;
   public static final String SYMLINK_OLD_JOB_TO_NEW =
