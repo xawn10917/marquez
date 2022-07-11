@@ -268,7 +268,7 @@ public interface JobDao extends BaseDao {
 
   @SqlQuery(
       """
-          INSERT INTO jobs_view AS j (
+          INSERT INTO jobs AS j (
           uuid,
           type,
           created_at,
@@ -294,7 +294,16 @@ public interface JobDao extends BaseDao {
           :location,
           :inputs,
           :symlinkTargetId
-          )
+          ) ON CONFLICT (name, namespace_uuid) WHERE parent_job_uuid IS NULL DO
+          UPDATE SET
+          updated_at = EXCLUDED.updated_at,
+          type = EXCLUDED.type,
+          description = EXCLUDED.description,
+          current_job_context_uuid = EXCLUDED.current_job_context_uuid,
+          current_location = EXCLUDED.current_location,
+          current_inputs = EXCLUDED.current_inputs,
+          -- update the symlink target if not null. otherwise, keep the old value
+          symlink_target_uuid = COALESCE(EXCLUDED.symlink_target_uuid, j.symlink_target_uuid)
           RETURNING uuid
           """)
   UUID upsertJob(
@@ -342,9 +351,10 @@ public interface JobDao extends BaseDao {
 
   @SqlQuery(
       """
-          INSERT INTO jobs_view AS j (
+          INSERT INTO jobs AS j (
           uuid,
           parent_job_uuid,
+          parent_job_id_string,
           type,
           created_at,
           updated_at,
@@ -359,6 +369,7 @@ public interface JobDao extends BaseDao {
           ) VALUES (
           :uuid,
           :parentJobUuid,
+          COALESCE(:parentJobUuid::text, ''),
           :type,
           :now,
           :now,
@@ -370,7 +381,16 @@ public interface JobDao extends BaseDao {
           :location,
           :inputs,
           :symlinkTargetId
-          )
+          ) ON CONFLICT (name, namespace_uuid, parent_job_id_string) DO
+          UPDATE SET
+          updated_at = EXCLUDED.updated_at,
+          type = EXCLUDED.type,
+          description = EXCLUDED.description,
+          current_job_context_uuid = EXCLUDED.current_job_context_uuid,
+          current_location = EXCLUDED.current_location,
+          current_inputs = EXCLUDED.current_inputs,
+          -- update the symlink target if not null. otherwise, keep the old value
+          symlink_target_uuid = COALESCE(EXCLUDED.symlink_target_uuid, j.symlink_target_uuid)
           RETURNING uuid
           """)
   UUID upsertJob(
