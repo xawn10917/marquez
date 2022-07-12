@@ -293,7 +293,6 @@ public interface JobVersionDao extends BaseDao {
    * @param transitionedAt The timestamp of the run state transition.
    * @return A {@link BagOfJobVersionInfo} object.
    */
-  @Transaction
   default BagOfJobVersionInfo upsertJobVersionOnRunTransition(
       @NonNull JobRow jobRow,
       @NonNull UUID runUuid,
@@ -324,7 +323,9 @@ public interface JobVersionDao extends BaseDao {
     final Version jobVersion =
         Utils.newJobVersionFor(
             NamespaceName.of(jobRow.getNamespaceName()),
-            JobName.of(jobRow.getName()),
+            JobName.of(Optional.ofNullable(jobRow.getParentJobName())
+                .map(pn -> pn + "." + jobRow.getSimpleName())
+                    .orElse(jobRow.getName())),
             toDatasetIds(jobVersionInputs),
             toDatasetIds(jobVersionOutputs),
             jobContext,

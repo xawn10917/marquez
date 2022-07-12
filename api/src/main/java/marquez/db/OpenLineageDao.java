@@ -83,7 +83,6 @@ public interface OpenLineageDao extends BaseDao {
       PGobject event,
       String producer);
 
-  @Transaction
   default UpdateLineageRow updateMarquezModel(LineageEvent event, ObjectMapper mapper) {
     UpdateLineageRow updateLineageRow = updateBaseMarquezModel(event, mapper);
     RunState runState = getRunState(event.getEventType());
