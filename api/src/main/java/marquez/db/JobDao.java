@@ -332,7 +332,8 @@ public interface JobDao extends BaseDao {
           current_job_context_uuid,
           current_location,
           current_inputs,
-          symlink_target_uuid
+          symlink_target_uuid,
+          parent_job_id_string
           ) VALUES (
           :uuid,
           :type,
@@ -345,9 +346,9 @@ public interface JobDao extends BaseDao {
           :jobContextUuid,
           :location,
           :inputs,
-          :symlinkTargetId
-          ) ON CONFLICT (name, namespace_uuid) WHERE parent_job_uuid IS NULL DO
-          UPDATE SET
+          :symlinkTargetId,
+          ''
+          ) ON CONFLICT (name, namespace_uuid, parent_job_id_string) DO UPDATE SET
           updated_at = EXCLUDED.updated_at,
           type = EXCLUDED.type,
           description = EXCLUDED.description,
