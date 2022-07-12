@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
 import com.google.common.collect.ImmutableMap;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -97,7 +98,7 @@ public final class Run {
     this.location = location;
     this.inputVersions = inputVersions;
     this.outputVersions = outputVersions;
-    this.context = context;
+    this.context = Optional.ofNullable(context).orElseGet(HashMap::new);
     this.facets = (facets == null) ? ImmutableMap.of() : facets;
   }
 
