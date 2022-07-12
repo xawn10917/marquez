@@ -7,10 +7,13 @@ package marquez.db;
 
 import static marquez.db.OpenLineageDao.DEFAULT_NAMESPACE_OWNER;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URL;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -118,6 +121,25 @@ public interface JobDao extends BaseDao {
           INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
           """)
   Optional<JobRow> findJobByNameAsRow(String namespaceName, String jobName);
+
+  @SqlQuery(
+      """
+          WITH RECURSIVE job_ids AS (
+            SELECT uuid, uuid AS link_target_uuid, symlink_target_uuid
+            FROM jobs_view j
+            WHERE j.namespace_name=:namespaceName AND j.name=:jobName AND j.parent_job_uuid=:parentJobUuid
+            UNION
+            SELECT jn.uuid, j.uuid AS link_target_uuid, j.symlink_target_uuid
+            FROM jobs_view j
+            INNER JOIN job_ids jn ON j.uuid=jn.symlink_target_uuid
+          )
+          SELECT j.*, n.name AS namespace_name
+          FROM jobs_view AS j
+          INNER JOIN job_ids jn ON jn.link_target_uuid=j.uuid AND jn.symlink_target_uuid IS NULL
+          INNER JOIN namespaces AS n ON j.namespace_uuid = n.uuid
+          """)
+  Optional<JobRow> findJobByNameAndParentAsRow(
+      String namespaceName, String jobName, UUID parentJobUuid);
 
   @SqlQuery(
       "SELECT j.*, jc.context, f.facets\n"
@@ -250,20 +272,50 @@ public interface JobDao extends BaseDao {
       String location,
       UUID symlinkTargetId,
       PGobject inputs) {
-    UUID id =
-        upsertJob(
-            uuid,
-            type,
-            now,
-            namespaceUuid,
-            namespaceName,
-            name,
-            description,
-            jobContextUuid,
-            location,
-            symlinkTargetId,
-            inputs);
-    return findJobByUuidAsRow(id).orElseThrow();
+    Optional<JobRow> jobRow = findJobByNameAsRow(namespaceName, name);
+    return jobRow
+        .flatMap(
+            jr -> {
+              Set<DatasetId> parseDatasetIds = parseDatasetIds(inputs);
+              if (!Objects.equals(description, jr.getDescription().orElse(null))
+                  || !Objects.equals(jobContextUuid, jr.getJobContextUuid().orElse(null))
+                  || !Objects.equals(location, jr.getLocation())
+                  || !Objects.equals(symlinkTargetId, jr.getSymlinkTargetId())
+                  || !Objects.equals(parseDatasetIds, jr.getInputs())) {
+                return Optional.empty();
+              } else {
+                return Optional.of(jr);
+              }
+            })
+        .orElseGet(
+            () -> {
+              UUID id =
+                  upsertJob(
+                      uuid,
+                      type,
+                      now,
+                      namespaceUuid,
+                      namespaceName,
+                      name,
+                      description,
+                      jobContextUuid,
+                      location,
+                      symlinkTargetId,
+                      inputs);
+              return findJobByUuidAsRow(id).orElseThrow();
+            });
+  }
+
+  static Set<DatasetId> parseDatasetIds(PGobject inputs) {
+    if (inputs == null) {
+      return null;
+    }
+    try {
+      return Utils.newObjectMapper()
+          .readValue(inputs.getValue(), new TypeReference<Set<DatasetId>>() {});
+    } catch (JsonProcessingException e) {
+      return null;
+    }
   }
 
   @SqlQuery(
@@ -332,21 +384,39 @@ public interface JobDao extends BaseDao {
       String location,
       UUID symlinkTargetId,
       PGobject inputs) {
-    UUID id =
-        upsertJob(
-            uuid,
-            parentJobUuid,
-            type,
-            now,
-            namespaceUuid,
-            namespaceName,
-            name,
-            description,
-            jobContextUuid,
-            location,
-            symlinkTargetId,
-            inputs);
-    return findJobByUuidAsRow(id).orElseThrow();
+    Optional<JobRow> jobRow = findJobByNameAndParentAsRow(namespaceName, name, parentJobUuid);
+    return jobRow
+        .flatMap(
+            jr -> {
+              Set<DatasetId> parseDatasetIds = parseDatasetIds(inputs);
+              if (!Objects.equals(description, jr.getDescription().orElse(null))
+                  || !Objects.equals(jobContextUuid, jr.getJobContextUuid().orElse(null))
+                  || !Objects.equals(location, jr.getLocation())
+                  || !Objects.equals(symlinkTargetId, jr.getSymlinkTargetId())
+                  || !Objects.equals(parseDatasetIds, jr.getInputs())) {
+                return Optional.empty();
+              } else {
+                return Optional.of(jr);
+              }
+            })
+        .orElseGet(
+            () -> {
+              UUID id =
+                  upsertJob(
+                      uuid,
+                      parentJobUuid,
+                      type,
+                      now,
+                      namespaceUuid,
+                      namespaceName,
+                      name,
+                      description,
+                      jobContextUuid,
+                      location,
+                      symlinkTargetId,
+                      inputs);
+              return findJobByUuidAsRow(id).orElseThrow();
+            });
   }
 
   @SqlQuery(
